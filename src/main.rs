@@ -1,8 +1,10 @@
 use colored::{Color, Colorize};
 use std::{
+    cmp::Ordering,
     collections::{HashMap, HashSet, VecDeque},
     fs::File,
     io::Read,
+    thread, time::{self, Instant},
 };
 
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -28,8 +30,14 @@ fn main() {
     // d9();
     // println!("d10");
     // d10();
-    println!("d11");
-    d11();
+    // println!("d11");
+    // d11();
+    println!("d12");
+    d12();
+    // println!("d13");
+    // d13();
+    // println!("d14");
+    // d14();
 }
 
 fn read_input(file: &str) -> Vec<String> {
@@ -1011,5 +1019,374 @@ fn d11() {
                 inspection_counts[0] * inspection_counts[1]
             );
         }
+    }
+}
+
+fn d12() {
+    let start = Instant::now();
+    let lines = read_input("in_d12");
+    let mut terrain = Vec::new();
+    let mut start_pos = None;
+    let mut end_pos = None;
+    let mut a_pos = Vec::new();
+    #[derive(Debug, Clone, Copy)]
+    enum Tile {
+        Value(u8),
+        Start,
+        End,
+    }
+    impl Tile {
+        fn value(&self) -> u8 {
+            match self {
+                Tile::Value(v) => *v,
+                Tile::Start => 0,
+                Tile::End => 'z' as u8 - 'a' as u8,
+            }
+        }
+    }
+    for (x, line) in lines.iter().enumerate() {
+        let row = line
+            .chars()
+            .enumerate()
+            .map(|(y, c)| match c {
+                'S' => {
+                    start_pos = Some((y, x));
+                    Tile::Start
+                }
+                'E' => {
+                    end_pos = Some((y, x));
+                    Tile::End
+                }
+                'a' => {
+                    a_pos.push((y, x));
+                    Tile::Value(0)
+                }
+                'a'..='z' => Tile::Value(c as u8 - 'a' as u8),
+                _ => panic!(),
+            })
+            .collect::<Vec<_>>();
+        terrain.push(row);
+    }
+
+    fn get_adjacent(pos: (usize, usize), terrain: &Vec<Vec<Tile>>) -> Vec<(usize, usize)> {
+        let mut adjacent = Vec::new();
+        let dirs = vec![(-1, 0), (1, 0), (0, -1), (0, 1)];
+        let tile = terrain[pos.1][pos.0];
+        for dir in dirs {
+            let x = pos.0 as i32 + dir.0;
+            let y = pos.1 as i32 + dir.1;
+            if x >= 0 && y >= 0 {
+                if let Some(neighbor) = terrain.get(y as usize).and_then(|row| row.get(x as usize))
+                {
+                    if neighbor.value() <= tile.value() + 1 {
+                        adjacent.push((x as usize, y as usize));
+                    }
+                }
+            }
+        }
+        adjacent
+    }
+    let mut visited = HashSet::new();
+    let mut current = vec![vec![start_pos.unwrap()], a_pos].concat();
+    visited.insert(start_pos.unwrap());
+    for i in 0.. {
+        let mut next = Vec::new();
+        for pos in current.iter() {
+            if pos == &end_pos.unwrap() {
+                println!("p1: {}", i);
+                let duration = start.elapsed();
+                println!("Time elapsed: {:?}", duration);
+                return;
+            }
+            for adj in get_adjacent(*pos, &terrain) {
+                if !visited.contains(&adj) {
+                    visited.insert(adj);
+                    next.push(adj);
+                }
+            }
+        }
+        current = next;
+    }
+}
+
+fn d13() {
+    let lines = read_input("in_d13");
+
+    #[derive(Debug, Clone)]
+    enum Value {
+        Int(i64),
+        List(Vec<Value>),
+    }
+
+    #[derive(Debug, Clone)]
+    struct Packet {
+        values: Value,
+    }
+
+    impl From<String> for Packet {
+        fn from(s: String) -> Self {
+            let mut values = HashMap::new();
+            values.insert(0, Value::List(Vec::new()));
+            let mut current = String::new();
+            let mut depth = 0;
+            for c in s.chars() {
+                match c {
+                    '[' => {
+                        depth += 1;
+                        values.insert(depth, Value::List(Vec::new()));
+                    }
+                    ']' => {
+                        let value = if let Some(Value::List(list)) = &mut values.remove(&(depth)) {
+                            if !current.is_empty() {
+                                list.push(Value::Int(current.parse().unwrap()));
+                                current.clear();
+                            }
+                            list.clone()
+                        } else {
+                            panic!("value {:?} is not a list", current)
+                        };
+                        depth -= 1;
+                        if let Some(Value::List(list)) = &mut values.get_mut(&(depth)) {
+                            list.push(Value::List(value));
+                        }
+                    }
+                    ',' => {
+                        if let Some(Value::List(list)) = &mut values.get_mut(&(depth)) {
+                            if !current.is_empty() {
+                                list.push(Value::Int(current.parse().unwrap()));
+                                current.clear();
+                            }
+                        }
+                    }
+                    v => current.push(v),
+                }
+            }
+            Packet {
+                values: values.get(&0).unwrap().clone(),
+            }
+        }
+    }
+
+    fn compare_values(v1: &Value, v2: &Value) -> Ordering {
+        match (v1, v2) {
+            (Value::Int(i1), Value::Int(i2)) => i1.cmp(i2),
+            (Value::List(l1), Value::List(l2)) => {
+                for (v1, v2) in l1.iter().zip(l2.iter()) {
+                    let cmp = compare_values(v1, v2);
+                    if cmp != Ordering::Equal {
+                        return cmp;
+                    }
+                }
+                if l1.len() < l2.len() {
+                    return Ordering::Less;
+                } else if l1.len() > l2.len() {
+                    return Ordering::Greater;
+                }
+                return Ordering::Equal;
+            }
+            (Value::Int(_), Value::List(_)) => {
+                return compare_values(&Value::List(vec![v1.clone()]), v2);
+            }
+            (Value::List(_), Value::Int(_)) => {
+                return compare_values(v1, &Value::List(vec![v2.clone()]));
+            }
+        }
+    }
+
+    let mut list = lines
+        .iter()
+        .filter(|l| !l.is_empty())
+        .map(|p| Packet::from(p.to_string()))
+        .collect::<Vec<_>>();
+
+    let p: Vec<[Packet; 2]> = list
+        .chunks_exact(2)
+        .map(|c| [c[0].clone(), c[1].clone()])
+        .collect();
+    let mut sum_of_correct = 0;
+    for (i, [p_left, p_right]) in p.iter().enumerate() {
+        let cmp = compare_values(&p_left.values, &p_right.values);
+        if Ordering::Less == cmp {
+            sum_of_correct += i + 1;
+        }
+    }
+    println!("p1: {}", sum_of_correct.to_string().bold().white());
+
+    let divider_packet1 = Value::List(vec![Value::List(vec![Value::Int(2)])]);
+    let divider_packet2 = Value::List(vec![Value::List(vec![Value::Int(6)])]);
+
+    list.push(Packet {
+        values: divider_packet1.clone(),
+    });
+
+    list.push(Packet {
+        values: divider_packet2.clone(),
+    });
+
+    list.sort_by(|p1, p2| compare_values(&p1.values, &p2.values));
+
+    let div1_index = list
+        .iter()
+        .position(|p| compare_values(&p.values, &divider_packet1) == Ordering::Equal)
+        .unwrap();
+
+    let div2_index = list
+        .iter()
+        .position(|p| compare_values(&p.values, &divider_packet2) == Ordering::Equal)
+        .unwrap();
+
+    println!("p2: {}", (div1_index + 1) * (div2_index + 1));
+}
+
+fn d14() {
+    let lines = read_input("in_d14");
+    let sand = (500, 0);
+    let mut stone_veins = Vec::new();
+
+    let mut max = (0, 0);
+    let mut min = ((0 as u32).overflowing_sub(1).0, 0);
+
+    for line in lines {
+        let inputs: Vec<(u32, u32)> = line
+            .split(" -> ")
+            .collect::<Vec<_>>()
+            .iter()
+            .map(
+                |p| match p.split(",").map(|n| n.parse().unwrap()).collect::<Vec<_>>()[..] {
+                    [x, y] => {
+                        if x > max.0 {
+                            max.0 = x;
+                        }
+                        if y > max.1 {
+                            max.1 = y;
+                        }
+                        if x < min.0 {
+                            min.0 = x;
+                        }
+                        if y < min.1 {
+                            min.1 = y;
+                        }
+                        (x, y)
+                    }
+                    _ => panic!("invalid input"),
+                },
+            )
+            .collect();
+        stone_veins.push(inputs);
+    }
+
+    fn is_stone(x: u32, y: u32, stone_veins: &Vec<Vec<(u32, u32)>>, max_y: &u32) -> bool {
+        if y == *max_y + 2 {
+            return true;
+        }
+        stone_veins.iter().any(|vein| {
+            (0..vein.len() - 1).any(|i| {
+                let (x1, y1) = vein[i];
+                let (x2, y2) = vein[i + 1];
+                if x1 == x2 {
+                    x == x1 && ((y >= y1 && y <= y2) || (y >= y2 && y <= y1))
+                } else if y1 == y2 {
+                    y == y1 && ((x >= x1 && x <= x2) || (x >= x2 && x <= x1))
+                } else {
+                    false
+                }
+            })
+        })
+    }
+
+    fn is_sand(x: u32, y: u32, sands: &Vec<(u32, u32)>) -> bool {
+        sands.iter().any(|(x1, y1)| x == *x1 && y == *y1)
+    }
+
+    fn is_occupied(
+        x: u32,
+        y: u32,
+        stone_veins: &Vec<Vec<(u32, u32)>>,
+        sands: &Vec<(u32, u32)>,
+        max_y: &u32,
+    ) -> bool {
+        is_sand(x, y, sands) || is_stone(x, y, stone_veins, max_y)
+    }
+
+    let mut can_move = true;
+    let mut current_sand = sand.clone();
+    let mut sands = Vec::new();
+    let mut trail = Vec::new();
+    let mut finished = false;
+
+    for i in 0.. {
+        print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
+        if !can_move {
+            sands.push(current_sand);
+            current_sand = sand.clone();
+            can_move = true;
+        }
+        while can_move {
+            trail.push(current_sand.clone());
+            if !is_occupied(
+                current_sand.0,
+                current_sand.1 + 1,
+                &stone_veins,
+                &sands,
+                &max.1,
+            ) {
+                current_sand.1 += 1;
+                continue;
+            }
+            if !is_occupied(
+                current_sand.0 - 1,
+                current_sand.1 + 1,
+                &stone_veins,
+                &sands,
+                &max.1,
+            ) {
+                current_sand.0 -= 1;
+                current_sand.1 += 1;
+                continue;
+            }
+            if !is_occupied(
+                current_sand.0 + 1,
+                current_sand.1 + 1,
+                &stone_veins,
+                &sands,
+                &max.1,
+            ) {
+                current_sand.0 += 1;
+                current_sand.1 += 1;
+                continue;
+            }
+            if current_sand == (500, 0) {
+                println!("[{}], start reached", sands.len() + 1);
+                finished = true;
+                break;
+            }
+            can_move = false;
+        }
+        if finished {
+            break;
+        }
+    }
+    for y in min.1..=(max.1 + 3) {
+        for x in (min.0 - 1)..=(max.0 + 1) {
+            let is_stone = is_stone(x, y, &stone_veins, &max.1);
+            let is_sand_spawner = (x, y) == sand;
+            let is_sand_block = is_sand(x, y, &sands);
+            let is_trail = is_sand(x, y, &trail);
+            print!(
+                "{}",
+                if is_sand_spawner {
+                    "  ".to_string().on_purple()
+                } else if is_stone {
+                    "  ".to_string().on_bright_black()
+                } else if is_sand_block {
+                    "  ".to_string().on_yellow()
+                } else if is_trail {
+                    "  ".to_string().on_bright_yellow()
+                } else {
+                    "██".to_string().on_black().black()
+                }
+            );
+        }
+        println!();
     }
 }
